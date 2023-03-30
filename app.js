@@ -5,14 +5,14 @@ import fragment from './shaders/fragment.glsl.js';
 import vertex from './shaders/vertex.glsl.js';
 import textFragment from './shaders/text/textFragment.glsl';
 import textVertex from './shaders/text/textVertex.glsl';
-import { FontLoader } from 'three/addons/loaders/FontLoader.js';
 import {
   MSDFTextGeometry,
   MSDFTextMaterial,
   uniforms,
 } from 'three-msdf-text-utils';
-import fnt from './fonts/Manifold/manifold-medium-msdf.json';
-import png from './fonts/Manifold/manifold-medium.png';
+import fnt from './fonts/Manifold/manifold-msdf.json';
+import png from './fonts/Manifold/manifold.png';
+import gradientTexture from './fonts/gradient-map.png';
 
 export default class Sketch {
   constructor() {
@@ -38,9 +38,11 @@ export default class Sketch {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
 
     this.time = 0;
+    this.mouse = { x: 0, y: 0 };
 
     this.addMesh();
     this.addText();
+    this.mouseEvents();
     this.render();
     // this.setupResize();
     // this.resize();
@@ -88,31 +90,71 @@ export default class Sketch {
     this.camera.updateProjectionMatrix();
   }
 
+  mouseEvents() {
+    window.addEventListener('mousemove', (e) => {
+      this.mouse = {
+        x: e.clientX / window.innerWidth,
+        y: e.clientY / window.innerHeight,
+      };
+      if (this.textMaterial && this.pointsMaterial) {
+        this.textMaterial.uniforms.uMouse.value = new THREE.Vector2(
+          this.mouse.x,
+          this.mouse.y
+        );
+        this.pointsMaterial.uniforms.uMouse.value = new THREE.Vector2(
+          this.mouse.x,
+          this.mouse.y
+        );
+      }
+    });
+  }
+
   addMesh() {
-    this.material = new THREE.ShaderMaterial({
+    let number = 1000;
+    let geo = new THREE.BufferGeometry();
+    let pos = [];
+
+    for (let i = 0; i < number; i++) {
+      let x = 4 * (Math.random() - 0.5);
+      let y = 4 * (Math.random() - 0.5);
+      let z = Math.random() - 0.5;
+
+      pos.push(x, y, z);
+    }
+
+    pos = new Float32Array(pos);
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+
+    this.pointsMaterial = new THREE.ShaderMaterial({
       extensions: {
         derivatives: '#extension GL_OES_standard_derivatives : enable',
       },
       uniforms: {
         time: { value: 0 },
+        uMouse: {
+          value: new THREE.Vector2(0, 0),
+        },
+        viewport: {
+          value: new THREE.Vector2(window.innerWidth, window.innerHeight),
+        },
         resolution: { value: new THREE.Vector4() },
-        bg: { value: new THREE.TextureLoader().load() },
       },
       fragmentShader: fragment,
       vertexShader: vertex,
-      side: THREE.DoubleSide,
-      // wireframe: true,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
     });
-    this.geometry = new THREE.PlaneGeometry(1, 1, 1, 1);
+    // this.pointsGeometry = new THREE.PlaneGeometry(1, 1, 1, 1);
 
-    this.plane = new THREE.Mesh(this.geometry, this.material);
-    // this.scene.add(this.plane);
+    this.points = new THREE.Points(geo, this.pointsMaterial);
+    this.scene.add(this.points);
   }
 
   addText() {
     Promise.all([loadFontAtlas(png)]).then(([atlas]) => {
       const geometry = new MSDFTextGeometry({
-        text: 'HELLO',
+        text: 'GOOD\nNIGHT',
         font: fnt,
       });
 
@@ -137,6 +179,18 @@ export default class Sketch {
           ...{
             uColor: { value: new THREE.Color(0xffffff) },
             uTime: { value: 0 },
+            uStrokeColor: { value: new THREE.Color(0x0abf3a) },
+            uStrokeOutsetWidth: { value: 0.1 },
+            // uStrokeInsetWidth: { value: 0.1 },
+            uGradientMap: {
+              value: new THREE.TextureLoader().load(gradientTexture),
+            },
+            uMouse: {
+              value: new THREE.Vector2(0, 0),
+            },
+            viewport: {
+              value: new THREE.Vector2(window.innerWidth, window.innerHeight),
+            },
           },
         },
         vertexShader: textVertex,
@@ -148,6 +202,7 @@ export default class Sketch {
       this.textMaterial.uniforms.uMap.value = atlas;
 
       const mesh = new THREE.Mesh(geometry, this.textMaterial);
+      mesh.name = 'text';
       mesh.scale.set(0.02, -0.02, 0.02);
       mesh.position.x = -1.5;
       this.scene.add(mesh);
@@ -165,10 +220,11 @@ export default class Sketch {
 
   render() {
     this.time += 0.05;
-    console.log(this.material);
-    this.textMaterial.uniforms.uTime.value = this.time;
     this.renderer.render(this.scene, this.camera);
     window.requestAnimationFrame(this.render.bind(this));
+    if (this.scene.children[1]?.material) {
+      this.scene.children[1].material.uniforms.uTime.value = this.time;
+    }
   }
 }
 
