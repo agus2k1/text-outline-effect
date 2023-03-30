@@ -6,8 +6,12 @@ const fragmentShader = `
     uniform float uOpacity;
     uniform float uThreshold;
     uniform float uAlphaTest;
-    uniform vec3 uColor;
     uniform sampler2D uMap;
+    uniform sampler2D uGradientMap;
+    uniform vec3 uColor;
+    uniform float uTime;
+    uniform vec2 uMouse;
+    uniform vec2 viewport;
 
     // Uniforms: Strokes
     uniform vec3 uStrokeColor;
@@ -19,44 +23,63 @@ const fragmentShader = `
         return max(min(r, g), min(max(r, g), b));
     }
 
+    float createCircle(){
+        vec2 viewportUv = gl_FragCoord.xy / viewport;
+        float viewportAspect = viewport.x / viewport.y;
+
+        vec2 mousePoint = vec2(uMouse.x, 1. - uMouse.y);
+        float circleRadius = max(0., 100. / viewport.x);
+
+        vec2 shapeUv = viewportUv - mousePoint;
+        shapeUv /= vec2(1., viewportAspect);
+        shapeUv += mousePoint;
+
+        float dist = distance(shapeUv, mousePoint);
+        dist = smoothstep(circleRadius, circleRadius + 0.001, dist);
+        return dist;
+    }
+
     void main() {
-        // Common
         // Texture sample
         vec3 s = texture2D(uMap, vUv).rgb;
+        float gradient = texture2D(uGradientMap, vUv).r;
 
         // Signed distance
         float sigDist = median(s.r, s.g, s.b) - 0.5;
         float afwidth = 1.4142135623730951 / 2.0;
         #ifdef IS_SMALL
-            float alpha = smoothstep(uThreshold - afwidth, uThreshold + afwidth, sigDist);
+            float fill = smoothstep(uThreshold - afwidth, uThreshold + afwidth, sigDist);
         #else
-            float alpha = clamp(sigDist / fwidth(sigDist) + 0.5, 0.0, 1.0);
+            float fill = clamp(sigDist / fwidth(sigDist) + 0.5, 0.0, 1.0);
         #endif
 
         // Strokes
-        // Outset
-        float sigDistOutset = sigDist + uStrokeOutsetWidth * 0.5;
-        // Inset
-        float sigDistInset = sigDist - uStrokeInsetWidth * 0.5;
-        #ifdef IS_SMALL
-            float outset = smoothstep(uThreshold - afwidth, uThreshold + afwidth, sigDistOutset);
-            float inset = 1.0 - smoothstep(uThreshold - afwidth, uThreshold + afwidth, sigDistInset);
-        #else
-            float outset = clamp(sigDistOutset / fwidth(sigDistOutset) + 0.5, 0.0, 1.0);
-            float inset = 1.0 - clamp(sigDistInset / fwidth(sigDistInset) + 0.5, 0.0, 1.0);
-        #endif
+        float border = fwidth(sigDist);
+        float outline = smoothstep(0., border, sigDist);
+        outline *= 1. - smoothstep(uStrokeOutsetWidth - border, uStrokeOutsetWidth, sigDist);
 
-        // Border
-        float border = outset * inset;
+        // Gradient
+        float lineWidth = 0.3;
+        float grgr = fract(2. * gradient + uTime * 0.1);
+
+        float start = smoothstep(0., 0.001, grgr);
+        float end = smoothstep(lineWidth, lineWidth - 0.001, grgr);
+        float mask = start * end;
+        mask = max(0.2, mask);
+
+        // Circle
+        float circle = createCircle();
+
+        float finalAlpha = outline * mask + fill * circle;
 
         // Alpha Test
-        if (alpha < uAlphaTest) discard;
+        if (fill < uAlphaTest) discard;
 
-        // Some animation
-        // alpha *= sin(uTime);
-
-        // Output: Common
-        vec4 filledFragColor = vec4(uColor, uOpacity * alpha);
+        // Output
+        vec4 filledFragColor = vec4(uColor, finalAlpha);
+        // vec4 filledFragColor = vec4(uColor, uOpacity * fill);
+        // filledFragColor = vec4(vec3(outline), fill);
+        // filledFragColor = vec4(vec3(circle), 1.);
         
         gl_FragColor = filledFragColor;
     }
